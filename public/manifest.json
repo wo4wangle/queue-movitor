@@ -1,17 +1,16 @@
 {
+  "author": "lewang",
+  "name": "plugin case",
+  "description": "plugin case",
+  "enableOnMobile": false,
+  "id": "lewang-0njisjy",
   "manifestVersion": 1,
-  "id": "plugin_template",
-  "name": "Plugin Template",
-  "author": "remnote",
-  "repoUrl": "",
+  "repoUrl": "https://github.com/wo4wangle/queue-movitor",
   "version": {
     "major": 0,
     "minor": 0,
     "patch": 1
   },
-  "theme": [],
-  "enableOnMobile": false,
-  "description": "",
   "requestNative": false,
   "requiredScopes": [
     {
