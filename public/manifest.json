@@ -1,21 +1,21 @@
 {
   "author": "lewang",
-  "name": "plugin case",
-  "description": "plugin case",
+  "name": "Move Rem to Top",
+  "description": "Quick keyboard shortcut to move rem to top",
   "enableOnMobile": false,
   "id": "lewang-0njisjy",
   "manifestVersion": 1,
   "repoUrl": "https://github.com/wo4wangle/queue-movitor",
   "version": {
     "major": 0,
-    "minor": 0,
-    "patch": 1
+    "minor": 1,
+    "patch": 0
   },
   "requestNative": false,
   "requiredScopes": [
     {
       "type": "All",
-      "level": "Read"
+      "level": "ReadCreateModify"
     }
   ]
 }
