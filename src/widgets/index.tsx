@@ -49,8 +49,9 @@ async function onActivate(plugin: ReactRNPlugin) {
         return;
       }
 
-      // Move rem to the top by setting positionAmongSiblings to 0
-      await focusedRem.setPositionAmongSiblings(0);
+      // Move rem to the top by changing its parent
+      // First, get the first child (which will be after our rem)
+      await focusedRem.setParent(parentRemId, 0);
       
       await plugin.app.toast('Moved rem to top!');
     },
