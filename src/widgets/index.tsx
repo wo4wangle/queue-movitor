@@ -56,6 +56,52 @@ async function onActivate(plugin: ReactRNPlugin) {
       await plugin.app.toast('Moved rem to top!');
     },
   });
+
+  // Register command to move rem to bottom with keyboard shortcut
+  await plugin.app.registerCommand({
+    id: 'move-rem-to-bottom',
+    name: 'Move Rem to Bottom',
+    keyboardShortcut: 'alt+shift+down',
+    action: async () => {
+      const focusedRem = await plugin.focus.getFocusedRem();
+
+      if (!focusedRem) {
+        await plugin.app.toast('No rem is focused');
+        return;
+      }
+
+      const parentRemId = focusedRem.parent;
+
+      if (!parentRemId) {
+        await plugin.app.toast('This rem has no parent');
+        return;
+      }
+
+      const parentRem = await plugin.rem.findOne(parentRemId);
+
+      if (!parentRem) {
+        await plugin.app.toast('Parent rem not found');
+        return;
+      }
+
+      const children = parentRem.children || [];
+      const currentIndex = children.indexOf(focusedRem._id);
+
+      if (currentIndex === -1) {
+        await plugin.app.toast('Could not find rem in parent\'s children');
+        return;
+      }
+
+      if (currentIndex === children.length - 1) {
+        await plugin.app.toast('Rem is already at the bottom');
+        return;
+      }
+
+      await focusedRem.setParent(parentRemId, children.length - 1);
+
+      await plugin.app.toast('Moved rem to bottom!');
+    },
+  });
 }
 
 async function onDeactivate(_: ReactRNPlugin) {}
