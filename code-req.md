@@ -13,6 +13,7 @@
 - `Alt+Shift+C` and the registered Rem menu item should copy the target Rem and descendants as nested Markdown bullet text.
 - Markdown output should preserve child order and indent children with two spaces per nesting level.
 - Multiline Rem Markdown, including fenced code blocks, should keep continuation lines indented under the bullet.
+- RemNote code block Rems should export as fenced Markdown code blocks and should not export internal metadata children such as `BoundHeight` or `Language`.
 - If direct clipboard writing fails, the plugin should open a popup containing the generated Markdown, auto-select it, and give the user an easy manual copy path.
 - Popup content must not depend on only one RemNote context shape; it should read direct popup fields, `contextData`, legacy `openContext.contextData`, and a session-storage fallback key.
 - In localhost development, avoid relying on a newly added widget entry while an old webpack dev server is still running; webpack entry discovery happens at server startup.
@@ -29,6 +30,7 @@
 - The manifest requests native plugin execution so direct clipboard APIs run outside the normal sandboxed iframe when RemNote allows it.
 - The copy action stores the generated Markdown in session storage before opening the popup. The popup uses this as a fallback when RemNote does not deliver `openPopup` context data consistently.
 - The popup is registered through the pre-existing `sample_widget` widget entry so an already-running dev server can serve the popup bundle without requiring a restart.
+- Code block Rems are detected by rich text `code: true` formatting or by internal metadata children; those metadata children are filtered only when they appear as RemNote internal doc links.
 
 ## Bug-Fix Learnings
 - Symptom: popup `document.execCommand('copy')` can report no thrown error while the clipboard remains unchanged inside RemNote's plugin iframe.
@@ -40,12 +42,16 @@
 - Symptom: popup opens blank in localhost development.
 - Root cause: the dev server was started before the new `copy_popup.tsx` entry existed, so `copy_popup-sandbox.js` returned 404.
 - Durable lesson: use an existing widget entry or restart the dev server whenever adding a new file under `src/widgets`.
+- Symptom: code block export produced `- haha` with child bullets for `[BoundHeight](...)` and `[Language](...)` instead of a fenced code block.
+- Root cause: RemNote stores code block details as child Rems/metadata, and `richText.toMarkdown(rem.text)` can return only the raw code text.
+- Durable lesson: detect RemNote code block metadata before recursing into children; format the parent text as fenced code and skip internal metadata children.
 
 ## Requirement Changes
 - 2026-05-26: New requirement to copy a Rem subtree as Markdown bullets, preferably from the Rem 6-dot menu and otherwise from command palette/keyboard shortcut.
 - 2026-05-26: Clipboard behavior changed from always opening a popup to trying direct copy first, then opening a popup only when direct copy is blocked.
 - 2026-05-26: Popup fallback changed to use session storage when RemNote does not pass context data in the expected shape.
 - 2026-05-26: Popup registration changed from the newly added `copy_popup` entry to existing `sample_widget` so the currently running dev server can serve the popup.
+- 2026-05-26: Code block export changed from raw text plus internal metadata bullets to fenced Markdown code blocks.
 
 ## Validation Notes
 - Targeted formatting coverage lives in `src/widgets/markdown.test.ts`.
@@ -55,3 +61,4 @@
 - 2026-05-26: Existing dev server on `http://localhost:8030` is serving the updated manifest with `requestNative: true`.
 - 2026-05-26: Added popup context shape tests; `npm test`, `npm run check-types`, and `npm run build` passed after the storage fallback fix.
 - 2026-05-26: Confirmed `http://localhost:8030/sample_widget-sandbox.js` contains the updated popup code and `index-sandbox.js` points to `sample_widget`.
+- 2026-05-26: Added regression coverage for code block metadata children; `npm test`, `npm run check-types`, and `npm run build` passed. Confirmed `http://localhost:8030/index-sandbox.js` contains the updated metadata filter.
