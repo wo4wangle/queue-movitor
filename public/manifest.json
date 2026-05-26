@@ -1,7 +1,7 @@
 {
   "author": "lewang",
-  "name": "Move Rem to Top",
-  "description": "Quick keyboard shortcut to move rem to top",
+  "name": "Move Rem Shortcuts",
+  "description": "Quick shortcuts for moving Rems and copying Rem subtrees as Markdown",
   "enableOnMobile": false,
   "id": "lewang-0njisjy",
   "manifestVersion": 1,
@@ -9,9 +9,9 @@
   "version": {
     "major": 0,
     "minor": 1,
-    "patch": 0
+    "patch": 1
   },
-  "requestNative": false,
+  "requestNative": true,
   "requiredScopes": [
     {
       "type": "All",
