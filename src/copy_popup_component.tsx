@@ -1,6 +1,7 @@
 import { usePlugin, useTracker } from '@remnote/plugin-sdk';
 import { useEffect, useRef, useState } from 'react';
 import { writeTextToClipboard } from './widgets/clipboard';
+import { appendDebugLog } from './widgets/debug_log';
 import { getPopupContextString } from './widgets/popup_context';
 
 export const CopyPopup = () => {
@@ -27,6 +28,9 @@ export const CopyPopup = () => {
       if (contextMarkdown !== undefined) {
         setMarkdown(contextMarkdown);
         setLoading(false);
+        await appendDebugLog(plugin, 'popup:markdown-from-context', {
+          length: contextMarkdown.length,
+        });
         return;
       }
 
@@ -36,6 +40,10 @@ export const CopyPopup = () => {
         if (!cancelled) {
           setMarkdown(storedMarkdown ?? '');
           setLoading(false);
+          await appendDebugLog(plugin, 'popup:markdown-from-storage', {
+            markdownStorageKey,
+            length: storedMarkdown?.length ?? 0,
+          });
         }
 
         return;
@@ -62,10 +70,12 @@ export const CopyPopup = () => {
       allowExecCommand: true,
       sourceTextArea: textareaRef.current,
     });
+    await appendDebugLog(plugin, 'popup:copy-result', result);
 
-    if (result.ok && result.method === 'navigator.clipboard') {
+    if (result.ok && result.method !== 'execCommand') {
       setCopyStatus('Copied.');
       await plugin.app.toast('Copied to clipboard!');
+      await plugin.widget.closePopup();
       return;
     }
 

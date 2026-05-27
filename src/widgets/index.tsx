@@ -1,39 +1,115 @@
 import {
+  AppEvents,
   declareIndexPlugin,
-  type CommandArgs,
   type ReactRNPlugin,
-  type Rem,
   WidgetLocation,
 } from '@remnote/plugin-sdk';
 import '../style.css';
 import '../index.css';
-import { writeTextToClipboard } from './clipboard';
+import { describeClipboardEnvironment, writeTextToClipboard } from './clipboard';
+import { appendDebugLog, getDebugLogText, stringifyDebugValue } from './debug_log';
 import { remsToMarkdown } from './markdown';
+import {
+  extractRemIdsFromSelectionEvent,
+  findTargetRems,
+  getEditorSelectedRemIds,
+  type CopyCommandArgs,
+} from './target_rems';
 
 const COPY_POPUP_WIDGET = 'sample_widget';
+const SELECTION_CACHE_LISTENER_KEY = 'copy-bullet-markdown-selection-cache';
+const SELECTION_CACHE_MAX_AGE_MS = 120000;
 
-type CopyCommandArgs = Partial<CommandArgs> & {
-  remId?: string;
-};
+let lastSelectedRemIds: string[] = [];
+let lastSelectedRemIdsAt = 0;
 
-function uniqueIds(ids: Array<string | undefined>): string[] {
-  return [...new Set(ids.filter((id): id is string => Boolean(id)))];
+async function refreshSelectionCache(plugin: ReactRNPlugin, event?: unknown) {
+  const eventSelectedRemIds = extractRemIdsFromSelectionEvent(event);
+  const selectedRemIds =
+    eventSelectedRemIds.length > 0 ? eventSelectedRemIds : await getEditorSelectedRemIds(plugin);
+
+  if (selectedRemIds.length > 0) {
+    lastSelectedRemIds = selectedRemIds;
+    lastSelectedRemIdsAt = Date.now();
+    await appendDebugLog(plugin, 'selection-cache:update', {
+      source: eventSelectedRemIds.length > 0 ? 'event' : 'api',
+      remIds: selectedRemIds,
+    });
+  } else if (event !== undefined) {
+    await appendDebugLog(plugin, 'selection-cache:empty-event', {
+      event,
+    });
+  }
 }
 
-async function findTargetRems(plugin: ReactRNPlugin, args?: CopyCommandArgs): Promise<Rem[]> {
-  const selectedRemIds = args?.selectedRem ?? [];
-  const commandRemIds =
-    selectedRemIds.length > 0
-      ? selectedRemIds
-      : uniqueIds([args?.focusedRem, args?.remId, args?.titleRem]);
-
-  if (commandRemIds.length > 0) {
-    const rems = await Promise.all(commandRemIds.map((id) => plugin.rem.findOne(id)));
-    return rems.filter((rem): rem is Rem => Boolean(rem));
+function getRecentSelectedRemIds(): string[] {
+  if (Date.now() - lastSelectedRemIdsAt > SELECTION_CACHE_MAX_AGE_MS) {
+    return [];
   }
 
-  const focusedRem = await plugin.focus.getFocusedRem();
-  return focusedRem ? [focusedRem] : [];
+  return lastSelectedRemIds;
+}
+
+async function getSelectionDiagnostics(plugin: ReactRNPlugin) {
+  const diagnostics: Record<string, unknown> = {
+    plugin: {
+      isNative: plugin.isNative,
+      inSandbox: plugin.inSandbox,
+      rootURL: plugin.rootURL,
+    },
+    clipboard: describeClipboardEnvironment(),
+    recentSelectedRemIds: getRecentSelectedRemIds(),
+    recentSelectedRemAgeMs: lastSelectedRemIdsAt === 0 ? undefined : Date.now() - lastSelectedRemIdsAt,
+  };
+
+  try {
+    diagnostics.editorSelectedRemIds = await getEditorSelectedRemIds(plugin);
+  } catch (error) {
+    diagnostics.editorSelectedRemError = error;
+  }
+
+  try {
+    const selection = await plugin.editor.getSelection();
+    diagnostics.editorSelection = selection;
+    diagnostics.extractedSelectionRemIds = extractRemIdsFromSelectionEvent(selection);
+  } catch (error) {
+    diagnostics.editorSelectionError = error;
+  }
+
+  try {
+    const focusedRem = await plugin.focus.getFocusedRem();
+    diagnostics.focusedRemId = focusedRem?._id;
+  } catch (error) {
+    diagnostics.focusedRemError = error;
+  }
+
+  return diagnostics;
+}
+
+async function openDebugPopup(plugin: ReactRNPlugin) {
+  const diagnostics = await getSelectionDiagnostics(plugin);
+  const debugLog = await getDebugLogText(plugin);
+  const markdown = [
+    '# cm debug',
+    '',
+    '## Diagnostics',
+    '```json',
+    stringifyDebugValue(diagnostics),
+    '```',
+    '',
+    '## Recent Logs',
+    '```text',
+    debugLog,
+    '```',
+  ].join('\n');
+  const markdownStorageKey = `copy-bullet-markdown-debug-${Date.now()}`;
+
+  await plugin.storage.setSession(markdownStorageKey, markdown);
+  await plugin.widget.openPopup(COPY_POPUP_WIDGET, {
+    markdownContent: markdown,
+    markdownStorageKey,
+    markdownLength: markdown.length,
+  });
 }
 
 async function onActivate(plugin: ReactRNPlugin) {
@@ -42,6 +118,23 @@ async function onActivate(plugin: ReactRNPlugin) {
   await plugin.app.registerWidget(COPY_POPUP_WIDGET, WidgetLocation.Popup, {
     dimensions: { width: 500, height: 300 },
   });
+  await appendDebugLog(plugin, 'activate', {
+    isNative: plugin.isNative,
+    inSandbox: plugin.inSandbox,
+    rootURL: plugin.rootURL,
+    clipboard: describeClipboardEnvironment(),
+  });
+
+  const updateSelectionCache = (event: unknown) => {
+    void refreshSelectionCache(plugin, event);
+  };
+
+  plugin.event.addListener(
+    AppEvents.EditorSelectionChanged,
+    SELECTION_CACHE_LISTENER_KEY,
+    updateSelectionCache
+  );
+  void refreshSelectionCache(plugin);
 
   // Register command to move rem to top with keyboard shortcut
   await plugin.app.registerCommand({
@@ -144,40 +237,86 @@ async function onActivate(plugin: ReactRNPlugin) {
   });
 
   const copyBulletMarkdownAction = async (args?: CopyCommandArgs) => {
-    const targetRems = await findTargetRems(plugin, args);
+    try {
+      const recentSelectedRemIds = getRecentSelectedRemIds();
 
-    if (targetRems.length === 0) {
-      await plugin.app.toast('No rem is focused');
-      return;
+      await appendDebugLog(plugin, 'copy:start', {
+        args,
+        recentSelectedRemIds,
+        recentSelectedRemAgeMs: lastSelectedRemIdsAt === 0 ? undefined : Date.now() - lastSelectedRemIdsAt,
+        clipboard: describeClipboardEnvironment(),
+      });
+
+      const targetRems = await findTargetRems(plugin, args, recentSelectedRemIds);
+
+      await appendDebugLog(plugin, 'copy:targets', {
+        targetRemIds: targetRems.map((rem) => rem._id),
+      });
+
+      if (targetRems.length === 0) {
+        await appendDebugLog(plugin, 'copy:no-target', await getSelectionDiagnostics(plugin));
+        await plugin.app.toast('No rem is selected or focused');
+        return;
+      }
+
+      const md = await remsToMarkdown(plugin, targetRems, {
+        onDebug: (eventName, details) => appendDebugLog(plugin, eventName, details),
+      });
+
+      await appendDebugLog(plugin, 'copy:markdown', {
+        length: md.length,
+        lines: md.split('\n').length,
+      });
+
+      const copyResult = await writeTextToClipboard(md);
+
+      await appendDebugLog(plugin, 'copy:clipboard-result', copyResult);
+
+      if (copyResult.ok) {
+        await plugin.app.toast('Copied bullet markdown to clipboard');
+        return;
+      }
+
+      const markdownStorageKey = `copy-bullet-markdown-${Date.now()}`;
+      await plugin.storage.setSession(markdownStorageKey, md);
+      await appendDebugLog(plugin, 'copy:fallback-popup', {
+        markdownStorageKey,
+        copyError: copyResult.error instanceof Error ? copyResult.error.message : String(copyResult.error ?? ''),
+        copyMethod: copyResult.method,
+      });
+
+      await plugin.widget.openPopup(COPY_POPUP_WIDGET, {
+        markdownContent: md,
+        markdownStorageKey,
+        markdownLength: md.length,
+        copyError: copyResult.error instanceof Error ? copyResult.error.message : String(copyResult.error ?? ''),
+      });
+    } catch (error) {
+      await appendDebugLog(plugin, 'copy:unhandled-error', error);
+      await plugin.app.toast('Copy Markdown failed. Run cm debug for details.');
     }
-
-    const md = await remsToMarkdown(plugin, targetRems);
-    const markdownStorageKey = `copy-bullet-markdown-${Date.now()}`;
-
-    await plugin.storage.setSession(markdownStorageKey, md);
-
-    const copyResult = await writeTextToClipboard(md, {
-      allowExecCommand: plugin.isNative === true,
-    });
-
-    if (copyResult.ok) {
-      await plugin.app.toast('Copied bullet markdown to clipboard');
-      return;
-    }
-
-    await plugin.widget.openPopup(COPY_POPUP_WIDGET, {
-      markdownContent: md,
-      markdownStorageKey,
-      markdownLength: md.length,
-      copyError: copyResult.error instanceof Error ? copyResult.error.message : String(copyResult.error ?? ''),
-    });
   };
 
   await plugin.app.registerCommand({
     id: 'copy-bullet-markdown-cmd',
-    name: 'Copy Bullet Markdown',
+    name: 'cm',
+    description: 'Copy selected or focused bullets as Markdown',
+    keywords: 'copy markdown bullet',
+    quickCode: 'cm',
     keyboardShortcut: 'alt+shift+c',
     action: copyBulletMarkdownAction,
+  });
+
+  await plugin.app.registerCommand({
+    id: 'copy-bullet-markdown-debug-cmd',
+    name: 'cm debug',
+    description: 'Show Copy Markdown debug information',
+    keywords: 'copy markdown debug clipboard selection',
+    quickCode: 'cm debug',
+    action: async () => {
+      await appendDebugLog(plugin, 'debug:open-command');
+      await openDebugPopup(plugin);
+    },
   });
 
   try {
@@ -191,6 +330,10 @@ async function onActivate(plugin: ReactRNPlugin) {
   }
 }
 
-async function onDeactivate(_: ReactRNPlugin) {}
+async function onDeactivate(plugin: ReactRNPlugin) {
+  plugin.event.removeListener(AppEvents.EditorSelectionChanged, SELECTION_CACHE_LISTENER_KEY);
+  lastSelectedRemIds = [];
+  lastSelectedRemIdsAt = 0;
+}
 
 declareIndexPlugin(onActivate, onDeactivate);

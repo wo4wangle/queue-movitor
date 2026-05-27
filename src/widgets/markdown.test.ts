@@ -1,6 +1,7 @@
 import assert from 'assert';
 import type { ReactRNPlugin, Rem, RichTextInterface } from '@remnote/plugin-sdk';
 import {
+  fallbackRichTextToMarkdown,
   formatFencedCodeBullet,
   formatMarkdownBullet,
   getCodeBlockLanguage,
@@ -17,6 +18,33 @@ assert.strictEqual(
 );
 
 assert.strictEqual(formatMarkdownBullet('line 1\nline 2', 1), '  - line 1\n    line 2');
+
+assert.strictEqual(
+  fallbackRichTextToMarkdown([{ i: 'm', text: 'Oracle', url: 'https://signup.cloud.oracle.com/' } as any]),
+  '[Oracle](https://signup.cloud.oracle.com/)'
+);
+
+assert.strictEqual(
+  fallbackRichTextToMarkdown([
+    {
+      i: 'u',
+      title: 'Oracle Cloud Free Tier Signup',
+      url: 'https://signup.cloud.oracle.com/',
+      siteName: null,
+      description: 'Oracle Cloud Free Tier Signup',
+      image: 'https://placehold.co/600x400.png',
+    } as any,
+  ]),
+  '[Oracle Cloud Free Tier Signup](https://signup.cloud.oracle.com/)'
+);
+
+assert.strictEqual(
+  fallbackRichTextToMarkdown([
+    { i: 'm', text: 'screenshot ' } as any,
+    { i: 'i', url: 'https://example.com/image.png', title: 'img' } as any,
+  ]),
+  'screenshot ![img](https://example.com/image.png)'
+);
 
 assert.strictEqual(
   formatFencedCodeBullet('haha', 2),
@@ -91,6 +119,23 @@ remToMarkdown(fakePlugin, root)
       markdown,
       ['- remnote plugin dev', '  - test', '    - ```', '      haha', '      ```'].join('\n')
     );
+
+    const imageRem = makeRem([
+      { i: 'm', text: 'with image ' } as any,
+      { i: 'i', url: 'https://example.com/image.png' } as any,
+    ]);
+    const fallbackPlugin = {
+      richText: {
+        toMarkdown: async () => {
+          throw new Error('toMarkdown failed');
+        },
+      },
+    } as unknown as ReactRNPlugin;
+
+    return remToMarkdown(fallbackPlugin, imageRem);
+  })
+  .then((markdown) => {
+    assert.strictEqual(markdown, '- with image ![](https://example.com/image.png)');
     console.log('markdown formatting tests passed');
   })
   .catch((error) => {
