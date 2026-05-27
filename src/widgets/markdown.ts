@@ -2,12 +2,16 @@ import type { ReactRNPlugin, Rem, RichTextInterface } from '@remnote/plugin-sdk'
 
 const REMNOTE_INTERNAL_METADATA_NAMES = new Set(['BoundHeight', 'Language']);
 const MARKDOWN_API_TIMEOUT_MS = 3000;
+const LOCAL_FILE_PREFIX = '%LOCAL_FILE%';
+const DEFAULT_REMNOTE_LOCAL_FILE_BASE_URL =
+  'file:///C:/Users/47638/remnote/remnote-608664f8fe7f0f004240f2af/files/';
 
 type MarkdownDebugLogger = (eventName: string, details?: unknown) => void | Promise<void>;
 
 export type MarkdownOptions = {
   apiTimeoutMs?: number;
   onDebug?: MarkdownDebugLogger;
+  localFileBaseUrl?: string;
 };
 
 function asRecord(value: unknown): Record<string, unknown> | undefined {
@@ -38,6 +42,45 @@ function getTextElementLinkUrl(record: Record<string, unknown>): string | undefi
   }
 }
 
+function normalizeFileUrl(value: string): string {
+  const withForwardSlashes = value.replace(/\\/g, '/');
+
+  if (withForwardSlashes.startsWith('file://')) {
+    return withForwardSlashes;
+  }
+
+  if (/^[a-zA-Z]:\//.test(withForwardSlashes)) {
+    return `file:///${withForwardSlashes}`;
+  }
+
+  return withForwardSlashes;
+}
+
+function normalizeLocalFileBaseUrl(value: string): string {
+  const fileUrl = normalizeFileUrl(value);
+  return fileUrl.endsWith('/') ? fileUrl : `${fileUrl}/`;
+}
+
+export function resolveLocalFileUrl(
+  url: string,
+  localFileBaseUrl: string = DEFAULT_REMNOTE_LOCAL_FILE_BASE_URL
+): string {
+  if (url.startsWith(LOCAL_FILE_PREFIX)) {
+    const fileName = url.slice(LOCAL_FILE_PREFIX.length);
+    return fileName ? `${normalizeLocalFileBaseUrl(localFileBaseUrl)}${fileName}` : url;
+  }
+
+  if (url.startsWith('local://')) {
+    return normalizeFileUrl(decodeURIComponent(url.slice('local://'.length)));
+  }
+
+  return normalizeFileUrl(url);
+}
+
+function resolveLocalFileUrlsInMarkdown(markdown: string, options?: MarkdownOptions): string {
+  return markdown.replace(/%LOCAL_FILE%[^)\s]+/g, (url) => resolveLocalFileUrl(url, options?.localFileBaseUrl));
+}
+
 function linkText(text: string, url: string): string {
   return `[${text.replace(/\]/g, '\\]')}](${url})`;
 }
@@ -63,7 +106,7 @@ async function debug(options: MarkdownOptions | undefined, eventName: string, de
   await options?.onDebug?.(eventName, details);
 }
 
-export function fallbackRichTextToMarkdown(richText: RichTextInterface): string {
+export function fallbackRichTextToMarkdown(richText: RichTextInterface, options?: MarkdownOptions): string {
   return richText
     .map((element) => {
       if (typeof element === 'string') {
@@ -78,18 +121,21 @@ export function fallbackRichTextToMarkdown(richText: RichTextInterface): string 
 
       if (record.i === 'm') {
         const text = stringifyInlineValue(record.text);
-        const url = getTextElementLinkUrl(record);
+        const rawUrl = getTextElementLinkUrl(record);
+        const url = rawUrl ? resolveLocalFileUrl(rawUrl, options?.localFileBaseUrl) : undefined;
         return url ? linkText(text || url, url) : text;
       }
 
       if (record.i === 'i') {
-        const url = getRichTextElementUrl(record);
+        const rawUrl = getRichTextElementUrl(record);
+        const url = rawUrl ? resolveLocalFileUrl(rawUrl, options?.localFileBaseUrl) : undefined;
         const title = stringifyInlineValue(record.title);
         return url ? `![${title.replace(/\]/g, '\\]')}](${url})` : title;
       }
 
       if (record.i === 'u') {
-        const url = getRichTextElementUrl(record);
+        const rawUrl = getRichTextElementUrl(record);
+        const url = rawUrl ? resolveLocalFileUrl(rawUrl, options?.localFileBaseUrl) : undefined;
         const title =
           stringifyInlineValue(record.title) ||
           stringifyInlineValue(record.description) ||
@@ -102,7 +148,8 @@ export function fallbackRichTextToMarkdown(richText: RichTextInterface): string 
       }
 
       if (record.i === 'a') {
-        const url = getRichTextElementUrl(record);
+        const rawUrl = getRichTextElementUrl(record);
+        const url = rawUrl ? resolveLocalFileUrl(rawUrl, options?.localFileBaseUrl) : undefined;
         return url ? `[audio](${url})` : '[audio]';
       }
 
@@ -112,12 +159,13 @@ export function fallbackRichTextToMarkdown(richText: RichTextInterface): string 
 
       if (record.i === 'n') {
         const text = stringifyInlineValue(record.text);
-        const url = getRichTextElementUrl(record);
+        const rawUrl = getRichTextElementUrl(record);
+        const url = rawUrl ? resolveLocalFileUrl(rawUrl, options?.localFileBaseUrl) : undefined;
         return url ? linkText(text || url, url) : text;
       }
 
       if (record.i === 'q' && Array.isArray(record.textOfDeletedRem)) {
-        return fallbackRichTextToMarkdown(record.textOfDeletedRem as RichTextInterface);
+        return fallbackRichTextToMarkdown(record.textOfDeletedRem as RichTextInterface, options);
       }
 
       if (typeof record.text === 'string') {
@@ -137,13 +185,15 @@ async function safeToMarkdown(
   label: string = 'richText.toMarkdown'
 ): Promise<string> {
   try {
-    return await withTimeout(
+    const markdown = await withTimeout(
       plugin.richText.toMarkdown(richText),
       options?.apiTimeoutMs ?? MARKDOWN_API_TIMEOUT_MS,
       label
     );
+
+    return resolveLocalFileUrlsInMarkdown(markdown, options);
   } catch (error) {
-    const fallbackMarkdown = fallbackRichTextToMarkdown(richText);
+    const fallbackMarkdown = resolveLocalFileUrlsInMarkdown(fallbackRichTextToMarkdown(richText, options), options);
     await debug(options, 'markdown:toMarkdown-fallback', {
       label,
       error,

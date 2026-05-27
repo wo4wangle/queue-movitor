@@ -7,6 +7,7 @@ import {
   getCodeBlockLanguage,
   isInternalRemNoteMetadataMarkdown,
   remToMarkdown,
+  resolveLocalFileUrl,
   richTextLooksLikeCodeBlock,
 } from './markdown';
 
@@ -44,6 +45,16 @@ assert.strictEqual(
     { i: 'i', url: 'https://example.com/image.png', title: 'img' } as any,
   ]),
   'screenshot ![img](https://example.com/image.png)'
+);
+
+const localImageToken = '%LOCAL_FILE%u8dKOxVLYQ3ioS-2HgC0iTxYYvl1tWSIb0SZBQXEiYnvZzjrao7nlL9EE0fx2FMEt-wpulPFC-BDMIo0IOSA1qSMluH4WUg4p03EBX34JtIWOUrA4sZUqwGIhtnQ5cCb.png';
+const localImageFileUrl = 'file:///C:/Users/47638/remnote/remnote-608664f8fe7f0f004240f2af/files/u8dKOxVLYQ3ioS-2HgC0iTxYYvl1tWSIb0SZBQXEiYnvZzjrao7nlL9EE0fx2FMEt-wpulPFC-BDMIo0IOSA1qSMluH4WUg4p03EBX34JtIWOUrA4sZUqwGIhtnQ5cCb.png';
+
+assert.strictEqual(resolveLocalFileUrl(localImageToken), localImageFileUrl);
+
+assert.strictEqual(
+  fallbackRichTextToMarkdown([{ i: 'i', url: localImageToken, title: 'image.png' } as any]),
+  `![image.png](${localImageFileUrl})`
 );
 
 assert.strictEqual(
@@ -136,6 +147,13 @@ remToMarkdown(fakePlugin, root)
   })
   .then((markdown) => {
     assert.strictEqual(markdown, '- with image ![](https://example.com/image.png)');
+
+    const localImageRem = makeRem(['![image.png](%LOCAL_FILE%u8dKOxVLYQ3ioS-2HgC0iTxYYvl1tWSIb0SZBQXEiYnvZzjrao7nlL9EE0fx2FMEt-wpulPFC-BDMIo0IOSA1qSMluH4WUg4p03EBX34JtIWOUrA4sZUqwGIhtnQ5cCb.png)']);
+
+    return remToMarkdown(fakePlugin, localImageRem);
+  })
+  .then((markdown) => {
+    assert.strictEqual(markdown, `- ![image.png](${localImageFileUrl})`);
     console.log('markdown formatting tests passed');
   })
   .catch((error) => {

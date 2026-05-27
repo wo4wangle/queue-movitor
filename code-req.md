@@ -15,7 +15,8 @@
 - Markdown output should preserve child order and indent children with two spaces per nesting level.
 - Multiline Rem Markdown, including fenced code blocks, should keep continuation lines indented under the bullet.
 - RemNote code block Rems should export as fenced Markdown code blocks and should not export internal metadata children such as `BoundHeight` or `Language`.
-- Rems containing links, images, audio, annotations, or other rich text elements should not make the copy command silently abort. If the SDK Markdown converter fails or hangs, export a best-effort Markdown fallback such as `[text](url)` or `![title](url)`.
+- Rems containing links, link previews, images, audio, annotations, or other rich text elements should not make the copy command silently abort. If the SDK Markdown converter fails or hangs, export a best-effort Markdown fallback such as `[text](url)`, `[title](url)`, or `![title](url)`.
+- RemNote local image references should be exported as normal local file URLs instead of `%LOCAL_FILE%...` placeholders when the local file root is known, so copied Markdown can render in other Markdown tools on the same machine.
 - The copy action should first try to write the generated Markdown directly to the clipboard without opening UI through reliable direct paths only: browser Clipboard API or a RemNote/Electron native clipboard bridge.
 - Automatic copy must not treat `document.execCommand('copy')` as verified success because it can return `true` while the RemNote iframe clipboard remains unchanged.
 - If verified direct clipboard writing fails, the plugin should open a popup containing the generated Markdown, auto-select it, and give the user an easy manual copy path.
@@ -41,6 +42,8 @@
 - The popup is registered through the pre-existing `sample_widget` widget entry so an already-running dev server can serve the popup bundle without requiring a restart.
 - Code block Rems are detected by rich text `code: true` formatting or by internal metadata children; those metadata children are filtered only when they appear as RemNote internal doc links.
 - Markdown generation wraps `richText.toMarkdown` and `getChildrenRem` with a timeout. On failure, text/link/image/audio/annotation rich text is converted locally so the command can continue to clipboard/popup handling.
+- RemNote link previews can arrive as rich text elements shaped like `{ i: "u", title, url, description, image }`; the fallback Markdown converter should render them as `[title || description || siteName || text || url](url)` instead of an empty bullet.
+- RemNote Desktop local image placeholders have been observed in RemNote logs as `%LOCAL_FILE%filename.png` resolving to `file:///C:/Users/47638/remnote/remnote-608664f8fe7f0f004240f2af/files/filename.png`; Markdown generation rewrites both SDK-produced Markdown and fallback rich text URLs through this local-file resolver.
 - The index widget listens for `EditorSelectionChanged`, extracts Rem IDs directly from the event payload when present, and caches the last non-empty Rem selection for 120 seconds so command-palette focus changes do not make multi-select copy lose its target.
 
 ## Bug-Fix Learnings
@@ -71,6 +74,12 @@
 - Symptom: `cm debug` showed copy logs stopping after `copy:targets` for Rems containing images or links; there was no `copy:markdown` or clipboard result.
 - Root cause: markdown generation could hang or throw inside SDK calls before clipboard handling, and the command action had no outer catch.
 - Durable lesson: wrap markdown generation with timeouts/fallback conversion and wrap the copy action with an outer error logger/toast so runtime failures are visible.
+- Symptom: `cm debug` showed a child link preview exported as a blank nested bullet, for example `- https://signup.cloud.oracle.com/` became `- `.
+- Root cause: RemNote represented the link preview as rich text `{ i: "u", title, url, description, image }`, and the local fallback converter did not handle the `u` element type after `richText.toMarkdown` rejected it.
+- Durable lesson: keep fallback rich-text conversion keyed to observed RemNote runtime element shapes, not only SDK-documented/plain text link shapes.
+- Symptom: image bullets exported as `![image.png](%LOCAL_FILE%...)`, which other Markdown tools could not resolve.
+- Root cause: `richText.toMarkdown` can preserve RemNote Desktop's private local-file placeholder instead of expanding it to the local file URL.
+- Durable lesson: post-process SDK Markdown output as well as fallback Markdown output for RemNote-local URL placeholders; do not limit URL fixes to fallback-only rich text conversion.
 
 ## Requirement Changes
 - 2026-05-26: New requirement to copy a Rem subtree as Markdown bullets, preferably from the Rem 6-dot menu and otherwise from command palette/keyboard shortcut.
@@ -83,6 +92,8 @@
 - 2026-05-27: Multi-select selection caching changed from API-only refresh to event-payload extraction plus `getSelectedRem()`/`getSelection()` fallback, with cache age extended to 120 seconds.
 - 2026-05-27: Added session-backed debug logging and the `cm debug` command for collecting RemNote runtime diagnostics.
 - 2026-05-27: Markdown generation changed to tolerate SDK failures/hangs for links/images by timing out and using local rich-text fallback conversion.
+- 2026-05-27: Link-preview fallback changed from blank output for `i: "u"` rich text elements to Markdown links using title/description/siteName/text/url fallback order.
+- 2026-05-27: Local image export changed from `%LOCAL_FILE%filename` to `file:///C:/Users/47638/remnote/remnote-608664f8fe7f0f004240f2af/files/filename` for the observed local RemNote Desktop data root.
 
 ## Validation Notes
 - Targeted formatting coverage lives in `src/widgets/markdown.test.ts`.
@@ -106,3 +117,6 @@
 - 2026-05-27: Added markdown fallback coverage for links/images and `toMarkdown` failure; targeted `npx ts-node src/widgets/markdown.test.ts` passed.
 - 2026-05-27: `npm test`, `npm run check-types`, and `npm run build` passed after markdown timeout/fallback changes. Build reported only existing bundle-size/performance warnings.
 - 2026-05-27: Confirmed `http://localhost:8030/index-sandbox.js` contains markdown fallback logging, timeout text, image fallback code, and the outer copy error logger.
+- 2026-05-27: Added link-preview fallback coverage for RemNote `i: "u"` rich text; `npx ts-node src/widgets/markdown.test.ts`, `npm test`, `npm run check-types`, and `npm run build` passed. Build reported only existing bundle-size/performance warnings.
+- 2026-05-27: Added local image placeholder coverage for `%LOCAL_FILE%...` in SDK-produced Markdown and fallback image rich text; `npx ts-node src/widgets/markdown.test.ts`, `npm test`, `npm run check-types`, and `npm run build` passed. Build reported only existing bundle-size/performance warnings.
+- 2026-05-27: Confirmed `http://localhost:8030/index-sandbox.js` contains the `%LOCAL_FILE%` resolver and `file:///C:/Users/47638/remnote/remnote-608664f8fe7f0f004240f2af/files/` base URL.
