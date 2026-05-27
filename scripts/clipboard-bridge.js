@@ -10,6 +10,8 @@ const ALLOWED_ORIGINS = new Set([
 ]);
 const WINDOWS_SET_CLIPBOARD_COMMAND =
   '[Console]::InputEncoding = [System.Text.Encoding]::UTF8; Set-Clipboard -Value ([Console]::In.ReadToEnd())';
+const WINDOWS_GET_CLIPBOARD_COMMAND =
+  '[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; Get-Clipboard -Raw';
 
 function isAllowedOrigin(origin) {
   return !origin || ALLOWED_ORIGINS.has(origin);
@@ -70,6 +72,32 @@ function writeClipboardWithCommand(command, args, text) {
   });
 }
 
+function readClipboardWithCommand(command, args) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(command, args, {
+      stdio: ['ignore', 'pipe', 'pipe'],
+      windowsHide: true,
+    });
+    let stdout = '';
+    let stderr = '';
+
+    child.stdout.on('data', (chunk) => {
+      stdout += chunk.toString('utf8');
+    });
+    child.stderr.on('data', (chunk) => {
+      stderr += chunk.toString();
+    });
+    child.on('error', reject);
+    child.on('close', (code) => {
+      if (code === 0) {
+        resolve(stdout);
+      } else {
+        reject(new Error(stderr.trim() || `${command} exited with code ${code}`));
+      }
+    });
+  });
+}
+
 async function writeClipboard(text) {
   if (process.platform === 'win32') {
     await writeClipboardWithCommand('powershell.exe', [
@@ -93,6 +121,27 @@ async function writeClipboard(text) {
   }
 }
 
+async function readClipboard() {
+  if (process.platform === 'win32') {
+    return readClipboardWithCommand('powershell.exe', [
+      '-NoProfile',
+      '-NonInteractive',
+      '-Command',
+      WINDOWS_GET_CLIPBOARD_COMMAND,
+    ]);
+  }
+
+  if (process.platform === 'darwin') {
+    return readClipboardWithCommand('pbpaste', []);
+  }
+
+  try {
+    return await readClipboardWithCommand('wl-paste', ['--no-newline']);
+  } catch {
+    return readClipboardWithCommand('xclip', ['-selection', 'clipboard', '-o']);
+  }
+}
+
 const server = http.createServer(async (req, res) => {
   const origin = req.headers.origin;
 
@@ -108,6 +157,16 @@ const server = http.createServer(async (req, res) => {
 
   if (req.method === 'GET' && req.url === '/health') {
     sendJson(res, 200, { ok: true, platform: process.platform }, origin);
+    return;
+  }
+
+  if (req.method === 'GET' && req.url === '/clipboard') {
+    try {
+      const text = await readClipboard();
+      sendJson(res, 200, { ok: true, text }, origin);
+    } catch (error) {
+      sendJson(res, 500, { ok: false, error: error instanceof Error ? error.message : String(error) }, origin);
+    }
     return;
   }
 
@@ -135,5 +194,6 @@ if (require.main === module) {
 }
 
 module.exports = {
+  WINDOWS_GET_CLIPBOARD_COMMAND,
   WINDOWS_SET_CLIPBOARD_COMMAND,
 };

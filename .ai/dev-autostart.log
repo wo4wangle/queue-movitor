@@ -1,2 +1,9 @@
 ﻿[2026-05-27T17:57:50.1814596+08:00] Autostart check: pluginPort8030=True bridgePort8031=True
 [2026-05-27T17:57:50.2161964+08:00] Both dev server and clipboard bridge are already running; nothing to start.
+[2026-05-27T20:03:38.3354434+08:00] Autostart check: pluginPort8030=True bridgePort8031=False
+[2026-05-27T20:03:38.3468283+08:00] Starting npm script: clipboard-bridge
+
+> remnote-plugin-template-react@0.0.1 clipboard-bridge
+> node scripts/clipboard-bridge.js
+
+Clipboard bridge listening on http://127.0.0.1:8031

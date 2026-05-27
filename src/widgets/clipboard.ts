@@ -10,6 +10,18 @@ export type ClipboardCopyResult = {
   error?: unknown;
 };
 
+export type ClipboardReadResult =
+  | {
+      ok: true;
+      method: Exclude<ClipboardCopyMethod, 'execCommand'>;
+      text: string;
+    }
+  | {
+      ok: false;
+      method?: Exclude<ClipboardCopyMethod, 'execCommand'>;
+      error?: unknown;
+    };
+
 type CopyOptions = {
   allowExecCommand?: boolean;
   allowLocalClipboardBridge?: boolean;
@@ -166,6 +178,47 @@ async function writeTextWithLocalClipboardBridge(
   }
 }
 
+async function readTextWithLocalClipboardBridge(
+  bridgeUrl: string = DEFAULT_LOCAL_CLIPBOARD_BRIDGE_URL
+): Promise<string> {
+  const fetchFn = (globalThis as unknown as { fetch?: typeof fetch }).fetch;
+
+  if (typeof fetchFn !== 'function') {
+    throw new Error('fetch is not available for local clipboard bridge');
+  }
+
+  const abortController = typeof AbortController === 'function' ? new AbortController() : undefined;
+  const timeoutId = abortController
+    ? setTimeout(() => abortController.abort(), LOCAL_CLIPBOARD_BRIDGE_TIMEOUT_MS)
+    : undefined;
+
+  try {
+    const response = await fetchFn(bridgeUrl, {
+      method: 'GET',
+      signal: abortController?.signal,
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text().catch(() => '');
+      throw new Error(`local clipboard bridge returned ${response.status}: ${errorText}`);
+    }
+
+    const responseJson = await response.json().catch(() => undefined);
+    const responseRecord = asRecord(responseJson);
+    const text = responseRecord?.text;
+
+    if (responseRecord && responseRecord.ok === false) {
+      throw new Error(String(responseRecord.error ?? 'local clipboard bridge failed'));
+    }
+
+    return typeof text === 'string' ? text : '';
+  } finally {
+    if (timeoutId) {
+      clearTimeout(timeoutId);
+    }
+  }
+}
+
 function selectTextArea(textArea: HTMLTextAreaElement) {
   textArea.focus();
   textArea.select();
@@ -271,4 +324,51 @@ export async function writeTextToClipboard(
   }
 
   return { ok: false };
+}
+
+export async function readTextFromClipboard({
+  allowLocalClipboardBridge = true,
+  localClipboardBridgeUrl = DEFAULT_LOCAL_CLIPBOARD_BRIDGE_URL,
+}: Pick<CopyOptions, 'allowLocalClipboardBridge' | 'localClipboardBridgeUrl'> = {}): Promise<ClipboardReadResult> {
+  let lastReadFailure: ClipboardReadResult = { ok: false };
+
+  try {
+    if (navigator.clipboard?.readText) {
+      return {
+        ok: true,
+        method: 'navigator.clipboard',
+        text: await navigator.clipboard.readText(),
+      };
+    }
+  } catch (error) {
+    lastReadFailure = { ok: false, method: 'navigator.clipboard', error };
+  }
+
+  try {
+    const electronClipboard = getElectronClipboard();
+
+    if (electronClipboard?.readText) {
+      return {
+        ok: true,
+        method: 'electron.clipboard',
+        text: await electronClipboard.readText(),
+      };
+    }
+  } catch (error) {
+    lastReadFailure = { ok: false, method: 'electron.clipboard', error };
+  }
+
+  if (allowLocalClipboardBridge) {
+    try {
+      return {
+        ok: true,
+        method: 'local.clipboard-bridge',
+        text: await readTextWithLocalClipboardBridge(localClipboardBridgeUrl),
+      };
+    } catch (error) {
+      lastReadFailure = { ok: false, method: 'local.clipboard-bridge', error };
+    }
+  }
+
+  return lastReadFailure;
 }

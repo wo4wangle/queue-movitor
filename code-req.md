@@ -20,6 +20,7 @@
 - The copy action should first try to write the generated Markdown directly to the clipboard without opening UI through reliable direct paths only: browser Clipboard API, RemNote/Electron native clipboard bridge, or the optional localhost clipboard bridge.
 - Automatic copy must not treat `document.execCommand('copy')` as verified success because it can return `true` while the RemNote iframe clipboard remains unchanged.
 - If verified direct clipboard writing fails, the plugin should open a popup containing the generated Markdown, auto-select it, and give the user an easy manual copy path.
+- If the command palette path loses all Rem target information, the plugin should try a best-effort fallback using RemNote's native `editor.copy()` for the current selection, then read the plaintext clipboard through the local bridge, normalize it to Markdown bullets, and write that Markdown back to the clipboard.
 - The plugin should expose a `cm debug` command that opens diagnostics and recent copy logs in a popup so RemNote runtime selection/clipboard behavior can be inspected without DevTools.
 - Popup content must not depend on only one RemNote context shape; it should read direct popup fields, `contextData`, legacy `openContext.contextData`, and a session-storage fallback key.
 - In localhost development, avoid relying on a newly added widget entry while an old webpack dev server is still running; webpack entry discovery happens at server startup.
@@ -39,6 +40,7 @@
 - Direct copy tries `navigator.clipboard.writeText` first, then likely Electron/native bridges such as `window.require('electron').clipboard.writeText`, `window.electron.clipboard.writeText`, `window.electronAPI.clipboard.writeText`, or `window.clipboard.writeText`, then the optional local bridge at `http://127.0.0.1:8031/clipboard`.
 - Direct copy is verified by reading clipboard text back when the API exposes `readText`; unverified writes fall back instead of reporting success.
 - The local bridge is implemented by `scripts/clipboard-bridge.js`. `npm run dev` starts both the webpack dev server and the clipboard bridge; `npm run dev:plugin` starts only the webpack dev server; `npm run clipboard-bridge` starts only the bridge; `npm run dev:direct-copy` is kept as an alias for `npm run dev`. On Windows it writes via PowerShell `Set-Clipboard` and explicitly sets `[Console]::InputEncoding` to UTF-8 before reading stdin.
+- The local bridge also supports `GET /clipboard` for reading plaintext clipboard content. On Windows it uses `Get-Clipboard -Raw` with UTF-8 stdout so fallback reads preserve Chinese text.
 - The copy action stores the generated Markdown in session storage only before opening the popup. The popup uses this as a fallback when RemNote does not deliver `openPopup` context data consistently.
 - Copy/debug actions append bounded debug lines to session storage under `copy-bullet-markdown-debug-log` and also write `[cm]` lines to the console.
 - The popup is registered through the pre-existing `sample_widget` widget entry so an already-running dev server can serve the popup bundle without requiring a restart.
@@ -46,7 +48,9 @@
 - Markdown generation wraps `richText.toMarkdown` and `getChildrenRem` with a timeout. On failure, text/link/image/audio/annotation rich text is converted locally so the command can continue to clipboard/popup handling.
 - RemNote link previews can arrive as rich text elements shaped like `{ i: "u", title, url, description, image }`; the fallback Markdown converter should render them as `[title || description || siteName || text || url](url)` instead of an empty bullet.
 - RemNote Desktop local image placeholders have been observed in RemNote logs as `%LOCAL_FILE%filename.png` resolving to `file:///C:/Users/47638/remnote/remnote-608664f8fe7f0f004240f2af/files/filename.png`; Markdown generation rewrites both SDK-produced Markdown and fallback rich text URLs through this local-file resolver.
-- The index widget listens for `EditorSelectionChanged`, extracts Rem IDs directly from the event payload when present, and caches the last non-empty Rem selection for 120 seconds so command-palette focus changes do not make multi-select copy lose its target.
+- The index widget listens for both `EditorSelectionChanged` and `FocusedRemChange`, extracts Rem IDs directly from event payloads when present, and caches the last non-empty Rem selection for 120 seconds so command-palette focus changes do not make multi-select copy lose its target.
+- Because RemNote desktop may not emit selection/focus events for line multi-selects, the index widget also polls the editor selection every 500ms and refreshes the same cache only when selected Rem IDs change.
+- Selection extraction must recognize RemNote focus-props range shapes such as `selectedDeepRemHighestLevelIds`, `selectedRange`, and `selectedDeepRemAllIds`, not only SDK `RemSelection.remIds` or command `selectedRem`.
 
 ## Bug-Fix Learnings
 - Symptom: popup `document.execCommand('copy')` can report no thrown error while the clipboard remains unchanged inside RemNote's plugin iframe.
@@ -70,6 +74,15 @@
 - Symptom: multi-selected bullets could still show `No rem is selected or focused` after opening the command palette.
 - Root cause: the selection cache refreshed by calling `getSelectedRem()` after the selection-change event, which can race with command palette focus changes and miss the original Rem selection.
 - Durable lesson: read `remIds` from the `EditorSelectionChanged` event payload itself when available, and use `editor.getSelection()` as a fallback in addition to `getSelectedRem()`.
+- Symptom: multi-selected bullets could still show `No rem is selected or focused` when running `cm` through Cmd/Ctrl+K after previous cache work.
+- Root cause: RemNote's selected-line focus state can be exposed as focus-props fields such as `selectedRange` or `selectedDeepRemHighestLevelIds`, and may arrive through `FocusedRemChange`, while the target resolver only understood `remIds`/`selectedRem`-style fields.
+- Durable lesson: cache selection from both selection and focused-rem events, and prefer highest-level selected Rem IDs before falling back to raw selected ranges so Markdown copy does not duplicate selected children.
+- Symptom: `cm debug` still showed `recentSelectedRemIds: []`, `editorSelectedRemIds: []`, and `extractedSelectionRemIds: []` for a visible multi-select after Cmd/Ctrl+K.
+- Root cause: in the observed RemNote desktop runtime, plugin selection/focus events were not delivered before the command palette cleared editor target state, leaving no Rem IDs available to the plugin command.
+- Durable lesson: when Rem IDs are unavailable, use a bridge fallback that asks RemNote to copy the current editor selection natively, reads the resulting plaintext clipboard through the local bridge, normalizes indentation into Markdown bullets, and writes the Markdown back to clipboard.
+- Symptom: the native editor-copy fallback logged `selection-type {}` and still produced `No rem is selected or focused`.
+- Root cause: `plugin.editor.copy()` returned `undefined` after Cmd/Ctrl+K had already cleared the selection, so even the native copy fallback had no live selection to copy.
+- Durable lesson: cache multi-select state before command execution by polling `getSelectedRem()` / `getSelection()` while the editor still owns the selection; also log copy-before/after clipboard change details when the fallback runs.
 - Symptom: after restarting RemNote, user still observed the same no-copy/no-selection behavior.
 - Root cause: the SDK/runtime behavior inside RemNote desktop could not be inferred from local tests alone.
 - Durable lesson: add first-class runtime diagnostics for clipboard capabilities, command args, target Rem IDs, generated Markdown size, fallback reason, and recent selection cache updates.
@@ -106,6 +119,9 @@
 - 2026-05-27: Windows localhost clipboard bridge changed to read stdin as UTF-8 before calling `Set-Clipboard`, fixing Chinese mojibake.
 - 2026-05-27: `npm run dev` changed to start both `dev:plugin` and `clipboard-bridge` automatically; `dev:direct-copy` is now an alias for `npm run dev`.
 - 2026-05-27: Added Windows logon autostart scripts for the dev server and clipboard bridge, installed as the scheduled task `RemNote Queue Movitor Dev`.
+- 2026-05-27: Multi-select target detection changed to recognize RemNote focus-props range payloads and to update the selection cache from `FocusedRemChange` as well as `EditorSelectionChanged`.
+- 2026-05-27: Added a no-target fallback for command-palette multi-select failures using `editor.copy()` plus local bridge clipboard read/write, and added `GET /clipboard` support to the bridge.
+- 2026-05-27: Added 500ms selection polling to populate the multi-select cache before Cmd/Ctrl+K clears live editor selection, and expanded fallback logs with `selectionTypeString` and clipboard `changedFromBefore`.
 
 ## Validation Notes
 - Targeted formatting coverage lives in `src/widgets/markdown.test.ts`.
@@ -136,3 +152,6 @@
 - 2026-05-27: Runtime smoke test posted `可以过两天再来看下，换英国 ip?` to `http://127.0.0.1:8031/clipboard` and `Get-Clipboard -Raw` returned the exact same Unicode text.
 - 2026-05-27: Verified `package.json` dev scripts with a Node assertion that `dev` runs `dev:plugin` plus `clipboard-bridge` without recursively calling itself; `npm test`, `npm run check-types`, and `npm run build` passed. Build reported only existing bundle-size/performance warnings.
 - 2026-05-27: Installed scheduled task `RemNote Queue Movitor Dev` with `npm run dev:autostart:install-start`; `Get-ScheduledTaskInfo` reported `LastTaskResult: 0`, and `.ai/dev-autostart.log` showed both ports already running with no duplicate startup.
+- 2026-05-27: Added regression coverage in `src/widgets/target_rems.test.ts` for `selectedRange`, `selectedDeepRemHighestLevelIds`, empty-highest-level fallback, object-shaped `selectedRem`, and command context data selection. `npx ts-node src/widgets/target_rems.test.ts`, `npm test`, `npm run check-types`, and `npm run build` passed. Build reported only existing bundle-size/performance warnings. Confirmed the dev server `index-sandbox.js` contains `copy-bullet-markdown-focused-rem-cache`, `selectedDeepRemHighestLevelIds`, and `selectedRange`.
+- 2026-05-27: Added `src/widgets/copied_selection.test.ts`, clipboard read coverage in `src/widgets/clipboard.test.ts`, and bridge read command coverage in `scripts/clipboard-bridge.test.js`. `npx ts-node src/widgets/copied_selection.test.ts`, `npx ts-node src/widgets/clipboard.test.ts`, `node scripts/clipboard-bridge.test.js`, `npm test`, `npm run check-types`, and `npm run build` passed. Restarted the local bridge; `GET http://127.0.0.1:8031/clipboard` returned 200, and the dev server bundle contains the editor-copy fallback markers.
+- 2026-05-27: After adding selection polling and more fallback diagnostics, `npm test`, `npm run check-types`, and `npm run build` passed. Confirmed the dev server `index-sandbox.js` contains `changedFromBefore`, `selectionTypeString`, and selection-cache polling markers.

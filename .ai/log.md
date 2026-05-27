@@ -33,3 +33,21 @@
 - Fix: Added PowerShell scripts to install/remove a Windows logon scheduled task. The task runs `start-dev-hidden.ps1`, which starts `dev:plugin` and `clipboard-bridge` only when ports 8030/8031 are not already listening.
 - Evidence: `npm run dev:autostart:install-start` installed and started scheduled task `RemNote Queue Movitor Dev`; `Get-ScheduledTaskInfo` returned `LastTaskResult: 0`.
 - Validation: `.ai/dev-autostart.log` showed both ports already running with no duplicate startup; `npm test`, `npm run check-types`, and `npm run build` passed.
+
+## 2026-05-27 19:09 CST - Cmd+K multi-select target fix
+- Context: User reported selecting multiple bullets, opening Cmd/Ctrl+K, running `cm`, and still getting `No rem is selected or focused`.
+- Evidence: SDK types expose selected-line focus data as `selectedRange`, `selectedDeepRemHighestLevelIds`, and `selectedDeepRemAllIds`; prior target extraction only recognized `remIds`/`selectedRem`-style fields.
+- Fix: `target_rems.ts` now extracts Rem IDs from RemNote focus-props range shapes, command context data, and object-shaped selected Rem arrays; `index.tsx` also listens to `FocusedRemChange` to cache selected ranges before the command palette clears live selection.
+- Validation: Added target regression coverage; `npx ts-node src/widgets/target_rems.test.ts`, `npm test`, `npm run check-types`, and `npm run build` passed. Build reported only existing bundle-size/performance warnings; `git diff --check` reported only CRLF normalization warnings. Dev server `index-sandbox.js` contains the new focus-cache and selected-range markers.
+
+## 2026-05-27 20:05 CST - Native editor copy fallback
+- Context: User-provided `cm debug` still showed no cached, editor, extracted, or focused Rem IDs for a visible multi-select after Cmd/Ctrl+K.
+- Evidence: Logs had repeated `copy:no-target` with empty diagnostics and no `selection-cache:update`; this indicates the RemNote desktop runtime did not deliver selection/focus payloads to the plugin before command execution.
+- Fix: Added a no-target fallback that calls `plugin.editor.copy()`, reads the plaintext clipboard through the local bridge, normalizes indentation into Markdown bullet syntax, and writes the Markdown back. Added bridge `GET /clipboard` support and restarted the running 8031 bridge.
+- Validation: `npx ts-node src/widgets/copied_selection.test.ts`, `npx ts-node src/widgets/clipboard.test.ts`, `node scripts/clipboard-bridge.test.js`, `npm test`, `npm run check-types`, and `npm run build` passed. `GET http://127.0.0.1:8031/clipboard` returned 200; dev server `index-sandbox.js` contains the fallback markers.
+
+## 2026-05-27 20:21 CST - Selection polling fallback
+- Context: User-provided `cm debug` showed `copy:editor-copy-fallback:start` followed by `selection-type {}`, meaning `plugin.editor.copy()` returned undefined after Cmd/Ctrl+K cleared selection.
+- Evidence: There were still no `selection-cache:update` lines before command execution, so event-based caching did not fire in RemNote desktop for line multi-selects.
+- Fix: Added a 500ms editor selection poll that refreshes the multi-select cache while the editor still owns selection; expanded fallback logs with `selectionTypeString`, `selectionTypeTypeof`, and clipboard `changedFromBefore`.
+- Validation: `npm test`, `npm run check-types`, and `npm run build` passed. Dev server `index-sandbox.js` contains selection-cache polling markers plus `changedFromBefore` and `selectionTypeString`.

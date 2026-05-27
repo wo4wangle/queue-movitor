@@ -5,7 +5,7 @@ export type CopyCommandArgs = Partial<CommandArgs> & {
 };
 
 function uniqueIds(ids: Array<string | undefined>): string[] {
-  return [...new Set(ids.filter((id): id is string => Boolean(id)))];
+  return [...new Set(ids.filter((id): id is string => typeof id === 'string' && id.length > 0))];
 }
 
 function isStringArray(value: unknown): value is string[] {
@@ -16,9 +16,35 @@ function asRecord(value: unknown): Record<string, unknown> | undefined {
   return typeof value === 'object' && value !== null ? (value as Record<string, unknown>) : undefined;
 }
 
+function remIdsFromObjectArray(value: unknown): string[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return uniqueIds(
+    value.map((item) => {
+      if (typeof item === 'string') {
+        return item;
+      }
+
+      const record = asRecord(item);
+      const remId = record?.remId;
+      const id = record?._id ?? record?.id;
+
+      return typeof remId === 'string' ? remId : typeof id === 'string' ? id : undefined;
+    })
+  );
+}
+
 export function extractRemIdsFromSelectionEvent(event: unknown, depth: number = 0): string[] {
   if (depth > 4) {
     return [];
+  }
+
+  if (Array.isArray(event)) {
+    return uniqueIds(
+      event.flatMap((item) => extractRemIdsFromSelectionEvent(item, depth + 1))
+    );
   }
 
   const record = asRecord(event);
@@ -27,15 +53,55 @@ export function extractRemIdsFromSelectionEvent(event: unknown, depth: number = 
     return [];
   }
 
-  for (const key of ['remIds', 'selectedRem', 'selectedRemIds']) {
+  for (const key of [
+    'selectedDeepRemHighestLevelIds',
+    'selectedRemIds',
+    'selectedRem',
+    'remIds',
+    'selectedRange',
+    'selectedLineIds',
+    'lineIds',
+  ]) {
     const value = record[key];
 
     if (isStringArray(value)) {
-      return uniqueIds(value);
+      const remIds = uniqueIds(value);
+
+      if (remIds.length > 0) {
+        return remIds;
+      }
     }
   }
 
-  for (const key of ['selection', 'selected', 'currentSelection', 'args', 'data', 'payload', 'event']) {
+  for (const key of [
+    'selectedDeepRemAllIds',
+    'selectedRem',
+    'selectedRemIds',
+    'selectedRems',
+    'rems',
+    'selectedLines',
+  ]) {
+    const nestedRemIds = remIdsFromObjectArray(record[key]);
+
+    if (nestedRemIds.length > 0) {
+      return nestedRemIds;
+    }
+  }
+
+  for (const key of [
+    'focusProps',
+    'selection',
+    'selected',
+    'currentSelection',
+    'args',
+    'data',
+    'payload',
+    'event',
+    'detail',
+    'context',
+    'contextData',
+    'openContext',
+  ]) {
     const nestedRemIds = extractRemIdsFromSelectionEvent(record[key], depth + 1);
 
     if (nestedRemIds.length > 0) {
@@ -72,7 +138,7 @@ export async function findTargetRems(
   args?: CopyCommandArgs,
   cachedSelectedRemIds: string[] = []
 ): Promise<Rem[]> {
-  const commandSelectedRemIds = args?.selectedRem ?? [];
+  const commandSelectedRemIds = extractRemIdsFromSelectionEvent(args);
 
   if (commandSelectedRemIds.length > 0) {
     return findRemsById(plugin, uniqueIds(commandSelectedRemIds));

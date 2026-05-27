@@ -61,6 +61,10 @@ findTargetRems(
       'selectedEventA',
     ]);
     assert.deepStrictEqual(
+      extractRemIdsFromSelectionEvent({ selectedRem: [{ _id: 'selectedObjectA' }] }),
+      ['selectedObjectA']
+    );
+    assert.deepStrictEqual(
       extractRemIdsFromSelectionEvent({
         selection: {
           type: 'Text',
@@ -68,6 +72,35 @@ findTargetRems(
         },
       }),
       []
+    );
+    assert.deepStrictEqual(
+      extractRemIdsFromSelectionEvent({
+        focusProps: {
+          type: 'selectedRange',
+          selectedRange: ['rangeA', 'rangeB'],
+        },
+      }),
+      ['rangeA', 'rangeB']
+    );
+    assert.deepStrictEqual(
+      extractRemIdsFromSelectionEvent({
+        focusProps: {
+          type: 'selectedRange',
+          selectedRange: ['rangeChildA', 'rangeChildB'],
+          selectedDeepRemHighestLevelIds: ['rootA', 'rootB'],
+        },
+      }),
+      ['rootA', 'rootB']
+    );
+    assert.deepStrictEqual(
+      extractRemIdsFromSelectionEvent({
+        focusProps: {
+          type: 'selectedRange',
+          selectedDeepRemHighestLevelIds: [],
+          selectedRange: ['rangeFallbackA', 'rangeFallbackB'],
+        },
+      }),
+      ['rangeFallbackA', 'rangeFallbackB']
     );
 
     assert.deepStrictEqual(
@@ -93,6 +126,28 @@ findTargetRems(
     assert.deepStrictEqual(
       targetRems.map((targetRem) => targetRem._id),
       ['argA', 'argB']
+    );
+
+    return findTargetRems(
+      makePlugin({
+        rems: {
+          commandA: rem('commandA'),
+          commandB: rem('commandB'),
+          editorA: rem('editorA'),
+        },
+        editorSelectedIds: ['editorA'],
+      }),
+      {
+        contextData: {
+          selectedDeepRemHighestLevelIds: ['commandA', 'commandB'],
+        },
+      } as any
+    );
+  })
+  .then((targetRems) => {
+    assert.deepStrictEqual(
+      targetRems.map((targetRem) => targetRem._id),
+      ['commandA', 'commandB']
     );
 
     return findTargetRems(

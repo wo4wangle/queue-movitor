@@ -4,7 +4,7 @@
   "version": "0.0.1",
   "license": "MIT",
   "scripts": {
-    "test": "ts-node src/widgets/markdown.test.ts && ts-node src/widgets/popup_context.test.ts && ts-node src/widgets/target_rems.test.ts && ts-node src/widgets/clipboard.test.ts && ts-node src/widgets/debug_log.test.ts && node scripts/clipboard-bridge.test.js && powershell -NoProfile -ExecutionPolicy Bypass -File scripts/dev-autostart.test.ps1",
+    "test": "ts-node src/widgets/markdown.test.ts && ts-node src/widgets/popup_context.test.ts && ts-node src/widgets/target_rems.test.ts && ts-node src/widgets/copied_selection.test.ts && ts-node src/widgets/clipboard.test.ts && ts-node src/widgets/debug_log.test.ts && node scripts/clipboard-bridge.test.js && powershell -NoProfile -ExecutionPolicy Bypass -File scripts/dev-autostart.test.ps1",
     "check-types": "tsc",
     "dev": "concurrently \"npm run dev:plugin\" \"npm run clipboard-bridge\"",
     "dev:plugin": "cross-env NODE_ENV=development webpack-dev-server --color --progress --no-open",

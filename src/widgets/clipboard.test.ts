@@ -1,5 +1,5 @@
 import assert from 'assert';
-import { describeClipboardEnvironment, writeTextToClipboard } from './clipboard';
+import { describeClipboardEnvironment, readTextFromClipboard, writeTextToClipboard } from './clipboard';
 
 const originalNavigator = Object.getOwnPropertyDescriptor(globalThis, 'navigator');
 const originalWindow = Object.getOwnPropertyDescriptor(globalThis, 'window');
@@ -76,6 +76,30 @@ async function run() {
   assert.strictEqual(bridgeResult.ok, true);
   assert.strictEqual(bridgeResult.method, 'local.clipboard-bridge');
   assert.strictEqual(bridgeCopiedText, 'bridge text');
+
+  setGlobalProperty('fetch', async (url: string, init?: { body?: string; method?: string }) => {
+    if (init?.method === 'POST') {
+      bridgeCopiedText = JSON.parse(init?.body ?? '{}').text;
+
+      return {
+        ok: true,
+        json: async () => ({ ok: true }),
+        text: async () => 'ok',
+      };
+    }
+
+    assert.strictEqual(url, 'http://127.0.0.1:8031/clipboard');
+    return {
+      ok: true,
+      json: async () => ({ ok: true, text: bridgeCopiedText }),
+      text: async () => bridgeCopiedText,
+    };
+  });
+
+  const bridgeReadResult = await readTextFromClipboard();
+  assert.strictEqual(bridgeReadResult.ok, true);
+  assert.strictEqual(bridgeReadResult.method, 'local.clipboard-bridge');
+  assert.strictEqual(bridgeReadResult.ok ? bridgeReadResult.text : '', 'bridge text');
 
   let execCommandCalls = 0;
   const fakeTextArea = {
