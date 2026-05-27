@@ -5,7 +5,7 @@
 - Covers moving focused Rems to top/bottom and copying a Rem subtree as Markdown bullets.
 
 ## Current Goal
-- Keep a practical `cm` command for copying selected/focused Rem subtrees as Markdown bullets, preferring verified direct clipboard copy and falling back to a convenient manual-copy popup only when RemNote/browser security blocks direct writes.
+- Keep a practical `cm` command for copying selected/focused Rem subtrees as Markdown bullets, preferring verified direct clipboard copy through browser/native/local bridge paths and falling back to a convenient manual-copy popup only when all direct paths are blocked or unavailable.
 
 ## Required Behavior
 - `Alt+Shift+Up` moves the focused Rem to the first child position under its parent.
@@ -17,7 +17,7 @@
 - RemNote code block Rems should export as fenced Markdown code blocks and should not export internal metadata children such as `BoundHeight` or `Language`.
 - Rems containing links, link previews, images, audio, annotations, or other rich text elements should not make the copy command silently abort. If the SDK Markdown converter fails or hangs, export a best-effort Markdown fallback such as `[text](url)`, `[title](url)`, or `![title](url)`.
 - RemNote local image references should be exported as normal local file URLs instead of `%LOCAL_FILE%...` placeholders when the local file root is known, so copied Markdown can render in other Markdown tools on the same machine.
-- The copy action should first try to write the generated Markdown directly to the clipboard without opening UI through reliable direct paths only: browser Clipboard API or a RemNote/Electron native clipboard bridge.
+- The copy action should first try to write the generated Markdown directly to the clipboard without opening UI through reliable direct paths only: browser Clipboard API, RemNote/Electron native clipboard bridge, or the optional localhost clipboard bridge.
 - Automatic copy must not treat `document.execCommand('copy')` as verified success because it can return `true` while the RemNote iframe clipboard remains unchanged.
 - If verified direct clipboard writing fails, the plugin should open a popup containing the generated Markdown, auto-select it, and give the user an easy manual copy path.
 - The plugin should expose a `cm debug` command that opens diagnostics and recent copy logs in a popup so RemNote runtime selection/clipboard behavior can be inspected without DevTools.
@@ -29,14 +29,16 @@
 - The SDK exposes host-side copy for current editor selections and Rem references, but not a typed API for writing arbitrary text to the clipboard.
 - Sandboxed RemNote plugin iframes may be blocked from clipboard APIs, so the feature must not depend solely on iframe `navigator.clipboard` or `document.execCommand('copy')`.
 - The popup's Copy button may still try `execCommand` as a user-gesture helper, but only `navigator.clipboard` or a native clipboard bridge count as verified copy success.
+- The local clipboard bridge is a development/local-machine helper bound to `127.0.0.1:8031`; it must accept only trusted localhost dev origins and must preserve Unicode text.
 - Existing move-to-top and move-to-bottom behavior must remain unchanged.
 
 ## Implementation Notes
 - `registerRemMenuItem` is present in the SDK but not documented as a public API; keep command-palette registration as the dependable entry point.
 - Command callbacks may receive RemNote command context arguments even though the SDK's `CommandFn` type is zero-argument. Prefer command-selected Rem IDs, live editor Rem selection, explicit context Rem IDs, recent cached Rem selection, then the focused Rem.
 - The manifest requests native plugin execution so direct clipboard APIs run outside the normal sandboxed iframe when RemNote allows it.
-- Direct copy tries `navigator.clipboard.writeText` first, then likely Electron/native bridges such as `window.require('electron').clipboard.writeText`, `window.electron.clipboard.writeText`, `window.electronAPI.clipboard.writeText`, or `window.clipboard.writeText`.
+- Direct copy tries `navigator.clipboard.writeText` first, then likely Electron/native bridges such as `window.require('electron').clipboard.writeText`, `window.electron.clipboard.writeText`, `window.electronAPI.clipboard.writeText`, or `window.clipboard.writeText`, then the optional local bridge at `http://127.0.0.1:8031/clipboard`.
 - Direct copy is verified by reading clipboard text back when the API exposes `readText`; unverified writes fall back instead of reporting success.
+- The local bridge is implemented by `scripts/clipboard-bridge.js`. `npm run dev` starts both the webpack dev server and the clipboard bridge; `npm run dev:plugin` starts only the webpack dev server; `npm run clipboard-bridge` starts only the bridge; `npm run dev:direct-copy` is kept as an alias for `npm run dev`. On Windows it writes via PowerShell `Set-Clipboard` and explicitly sets `[Console]::InputEncoding` to UTF-8 before reading stdin.
 - The copy action stores the generated Markdown in session storage only before opening the popup. The popup uses this as a fallback when RemNote does not deliver `openPopup` context data consistently.
 - Copy/debug actions append bounded debug lines to session storage under `copy-bullet-markdown-debug-log` and also write `[cm]` lines to the console.
 - The popup is registered through the pre-existing `sample_widget` widget entry so an already-running dev server can serve the popup bundle without requiring a restart.
@@ -80,6 +82,12 @@
 - Symptom: image bullets exported as `![image.png](%LOCAL_FILE%...)`, which other Markdown tools could not resolve.
 - Root cause: `richText.toMarkdown` can preserve RemNote Desktop's private local-file placeholder instead of expanding it to the local file URL.
 - Durable lesson: post-process SDK Markdown output as well as fallback Markdown output for RemNote-local URL placeholders; do not limit URL fixes to fallback-only rich text conversion.
+- Symptom: direct copy still opened the popup whenever RemNote sandbox blocked `navigator.clipboard`.
+- Root cause: SDK v0.0.14 does not expose a typed arbitrary-text clipboard API, and the plugin iframe has no Electron clipboard bridge in the observed desktop runtime.
+- Durable lesson: no-popup arbitrary text copy in local development needs an out-of-frame localhost bridge; keep popup fallback for machines where the bridge is not running.
+- Symptom: text copied through the Windows localhost bridge turned Chinese into mojibake, for example `可以过两天再来看下，换英国 ip?` became `鍙互...`.
+- Root cause: Windows PowerShell decoded Node's UTF-8 stdin using the console default code page before `Set-Clipboard`.
+- Durable lesson: the Windows bridge must set `[Console]::InputEncoding = [System.Text.Encoding]::UTF8` before reading stdin.
 
 ## Requirement Changes
 - 2026-05-26: New requirement to copy a Rem subtree as Markdown bullets, preferably from the Rem 6-dot menu and otherwise from command palette/keyboard shortcut.
@@ -94,6 +102,10 @@
 - 2026-05-27: Markdown generation changed to tolerate SDK failures/hangs for links/images by timing out and using local rich-text fallback conversion.
 - 2026-05-27: Link-preview fallback changed from blank output for `i: "u"` rich text elements to Markdown links using title/description/siteName/text/url fallback order.
 - 2026-05-27: Local image export changed from `%LOCAL_FILE%filename` to `file:///C:/Users/47638/remnote/remnote-608664f8fe7f0f004240f2af/files/filename` for the observed local RemNote Desktop data root.
+- 2026-05-27: Added optional localhost clipboard bridge fallback so sandboxed RemNote can copy Markdown directly without a popup when `npm run clipboard-bridge` or `npm run dev:direct-copy` is running.
+- 2026-05-27: Windows localhost clipboard bridge changed to read stdin as UTF-8 before calling `Set-Clipboard`, fixing Chinese mojibake.
+- 2026-05-27: `npm run dev` changed to start both `dev:plugin` and `clipboard-bridge` automatically; `dev:direct-copy` is now an alias for `npm run dev`.
+- 2026-05-27: Added Windows logon autostart scripts for the dev server and clipboard bridge, installed as the scheduled task `RemNote Queue Movitor Dev`.
 
 ## Validation Notes
 - Targeted formatting coverage lives in `src/widgets/markdown.test.ts`.
@@ -120,3 +132,7 @@
 - 2026-05-27: Added link-preview fallback coverage for RemNote `i: "u"` rich text; `npx ts-node src/widgets/markdown.test.ts`, `npm test`, `npm run check-types`, and `npm run build` passed. Build reported only existing bundle-size/performance warnings.
 - 2026-05-27: Added local image placeholder coverage for `%LOCAL_FILE%...` in SDK-produced Markdown and fallback image rich text; `npx ts-node src/widgets/markdown.test.ts`, `npm test`, `npm run check-types`, and `npm run build` passed. Build reported only existing bundle-size/performance warnings.
 - 2026-05-27: Confirmed `http://localhost:8030/index-sandbox.js` contains the `%LOCAL_FILE%` resolver and `file:///C:/Users/47638/remnote/remnote-608664f8fe7f0f004240f2af/files/` base URL.
+- 2026-05-27: Added local clipboard bridge coverage in `src/widgets/clipboard.test.ts` and `scripts/clipboard-bridge.test.js`; `node scripts/clipboard-bridge.test.js`, `npm test`, and `npm run check-types` passed.
+- 2026-05-27: Runtime smoke test posted `可以过两天再来看下，换英国 ip?` to `http://127.0.0.1:8031/clipboard` and `Get-Clipboard -Raw` returned the exact same Unicode text.
+- 2026-05-27: Verified `package.json` dev scripts with a Node assertion that `dev` runs `dev:plugin` plus `clipboard-bridge` without recursively calling itself; `npm test`, `npm run check-types`, and `npm run build` passed. Build reported only existing bundle-size/performance warnings.
+- 2026-05-27: Installed scheduled task `RemNote Queue Movitor Dev` with `npm run dev:autostart:install-start`; `Get-ScheduledTaskInfo` reported `LastTaskResult: 0`, and `.ai/dev-autostart.log` showed both ports already running with no duplicate startup.

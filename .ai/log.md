@@ -16,3 +16,20 @@
 - Evidence: RemNote desktop logs showed the same token resolving to `file:///C:/Users/47638/remnote/remnote-608664f8fe7f0f004240f2af/files/u8dKOxVLYQ3ioS-2HgC0iTxYYvl1tWSIb0SZBQXEiYnvZzjrao7nlL9EE0fx2FMEt-wpulPFC-BDMIo0IOSA1qSMluH4WUg4p03EBX34JtIWOUrA4sZUqwGIhtnQ5cCb.png`; `Test-Path` confirmed the file exists.
 - Fix: Added local-file URL resolution for `%LOCAL_FILE%...`, `local://...`, and raw `C:/...` paths, and post-process SDK Markdown output as well as fallback rich-text output.
 - Validation: `npx ts-node src/widgets/markdown.test.ts`, `npm test`, `npm run check-types`, and `npm run build` passed; `http://localhost:8030/index-sandbox.js` contains the `%LOCAL_FILE%` resolver and local file base URL.
+
+## 2026-05-27 17:32 CST - Clipboard bridge Unicode fix
+- Context: User reported localhost bridge direct copy corrupted Chinese text, e.g. `可以过两天再来看下，换英国 ip?` became mojibake.
+- Evidence: The bridge wrote text to PowerShell `Set-Clipboard` through stdin without forcing stdin encoding; this is consistent with UTF-8 bytes being decoded by the Windows console code page.
+- Fix: Windows bridge command now sets `[Console]::InputEncoding = [System.Text.Encoding]::UTF8` before reading `[Console]::In.ReadToEnd()`.
+- Validation: Runtime smoke POST to `http://127.0.0.1:8031/clipboard` with `可以过两天再来看下，换英国 ip?` returned exact text from `Get-Clipboard -Raw`; `node scripts/clipboard-bridge.test.js`, `npm test`, and `npm run check-types` passed.
+
+## 2026-05-27 17:44 CST - Dev starts clipboard bridge
+- Context: User asked for `npm run dev` to start the clipboard bridge automatically.
+- Fix: `npm run dev` now runs `dev:plugin` and `clipboard-bridge` through `concurrently`; `dev:plugin` preserves the old webpack-dev-server-only command, and `dev:direct-copy` aliases `npm run dev`.
+- Validation: Node script assertion confirmed `dev` runs both commands without recursive self-calls; `npm test`, `npm run check-types`, and `npm run build` passed.
+
+## 2026-05-27 17:58 CST - Windows logon autostart
+- Context: User asked whether `npm run dev` can run automatically after boot.
+- Fix: Added PowerShell scripts to install/remove a Windows logon scheduled task. The task runs `start-dev-hidden.ps1`, which starts `dev:plugin` and `clipboard-bridge` only when ports 8030/8031 are not already listening.
+- Evidence: `npm run dev:autostart:install-start` installed and started scheduled task `RemNote Queue Movitor Dev`; `Get-ScheduledTaskInfo` returned `LastTaskResult: 0`.
+- Validation: `.ai/dev-autostart.log` showed both ports already running with no duplicate startup; `npm test`, `npm run check-types`, and `npm run build` passed.

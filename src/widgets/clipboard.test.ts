@@ -4,15 +4,16 @@ import { describeClipboardEnvironment, writeTextToClipboard } from './clipboard'
 const originalNavigator = Object.getOwnPropertyDescriptor(globalThis, 'navigator');
 const originalWindow = Object.getOwnPropertyDescriptor(globalThis, 'window');
 const originalDocument = Object.getOwnPropertyDescriptor(globalThis, 'document');
+const originalFetch = Object.getOwnPropertyDescriptor(globalThis, 'fetch');
 
-function setGlobalProperty(name: 'navigator' | 'window' | 'document', value: unknown) {
+function setGlobalProperty(name: 'navigator' | 'window' | 'document' | 'fetch', value: unknown) {
   Object.defineProperty(globalThis, name, {
     configurable: true,
     value,
   });
 }
 
-function restoreGlobalProperty(name: 'navigator' | 'window' | 'document', descriptor?: PropertyDescriptor) {
+function restoreGlobalProperty(name: 'navigator' | 'window' | 'document' | 'fetch', descriptor?: PropertyDescriptor) {
   if (descriptor) {
     Object.defineProperty(globalThis, name, descriptor);
   } else {
@@ -53,9 +54,28 @@ async function run() {
     },
   });
 
-  const unverifiedNativeResult = await writeTextToClipboard('unverified native text');
+  const unverifiedNativeResult = await writeTextToClipboard('unverified native text', {
+    allowLocalClipboardBridge: false,
+  });
   assert.strictEqual(unverifiedNativeResult.ok, false);
   assert.strictEqual(unverifiedNativeResult.method, 'electron.clipboard');
+
+  let bridgeCopiedText = '';
+  setGlobalProperty('window', {});
+  setGlobalProperty('fetch', async (_url: string, init?: { body?: string }) => {
+    bridgeCopiedText = JSON.parse(init?.body ?? '{}').text;
+
+    return {
+      ok: true,
+      json: async () => ({ ok: true }),
+      text: async () => 'ok',
+    };
+  });
+
+  const bridgeResult = await writeTextToClipboard('bridge text');
+  assert.strictEqual(bridgeResult.ok, true);
+  assert.strictEqual(bridgeResult.method, 'local.clipboard-bridge');
+  assert.strictEqual(bridgeCopiedText, 'bridge text');
 
   let execCommandCalls = 0;
   const fakeTextArea = {
@@ -80,12 +100,15 @@ async function run() {
     },
   });
 
-  const noExecResult = await writeTextToClipboard('plain text');
+  const noExecResult = await writeTextToClipboard('plain text', {
+    allowLocalClipboardBridge: false,
+  });
   assert.strictEqual(noExecResult.ok, false);
   assert.strictEqual(execCommandCalls, 0);
 
   const execResult = await writeTextToClipboard('manual text', {
     allowExecCommand: true,
+    allowLocalClipboardBridge: false,
   });
   assert.strictEqual(execResult.ok, true);
   assert.strictEqual(execResult.method, 'execCommand');
@@ -104,4 +127,5 @@ run()
     restoreGlobalProperty('navigator', originalNavigator);
     restoreGlobalProperty('window', originalWindow);
     restoreGlobalProperty('document', originalDocument);
+    restoreGlobalProperty('fetch', originalFetch);
   });

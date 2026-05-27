@@ -4,9 +4,15 @@
   "version": "0.0.1",
   "license": "MIT",
   "scripts": {
-    "test": "ts-node src/widgets/markdown.test.ts && ts-node src/widgets/popup_context.test.ts && ts-node src/widgets/target_rems.test.ts && ts-node src/widgets/clipboard.test.ts && ts-node src/widgets/debug_log.test.ts",
+    "test": "ts-node src/widgets/markdown.test.ts && ts-node src/widgets/popup_context.test.ts && ts-node src/widgets/target_rems.test.ts && ts-node src/widgets/clipboard.test.ts && ts-node src/widgets/debug_log.test.ts && node scripts/clipboard-bridge.test.js && powershell -NoProfile -ExecutionPolicy Bypass -File scripts/dev-autostart.test.ps1",
     "check-types": "tsc",
-    "dev": "cross-env NODE_ENV=development webpack-dev-server --color --progress --no-open",
+    "dev": "concurrently \"npm run dev:plugin\" \"npm run clipboard-bridge\"",
+    "dev:plugin": "cross-env NODE_ENV=development webpack-dev-server --color --progress --no-open",
+    "clipboard-bridge": "node scripts/clipboard-bridge.js",
+    "dev:direct-copy": "npm run dev",
+    "dev:autostart:install": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/install-dev-autostart.ps1",
+    "dev:autostart:install-start": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/install-dev-autostart.ps1 -StartNow",
+    "dev:autostart:remove": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/uninstall-dev-autostart.ps1",
     "build": "npx remnote-plugin validate && shx rm -rf dist && cross-env NODE_ENV=production webpack --color --progress && cd dist && bestzip ../PluginZip.zip ./*"
   },
   "dependencies": {
