@@ -341,7 +341,7 @@ async function onActivate(plugin: ReactRNPlugin) {
         return;
       }
 
-      await focusedRem.setParent(parentRemId, children.length - 1);
+      await focusedRem.setParent(parentRemId, children.length);
 
       await plugin.app.toast('Moved rem to bottom!');
     },
