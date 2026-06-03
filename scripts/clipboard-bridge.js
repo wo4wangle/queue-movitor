@@ -54,6 +54,7 @@ function writeClipboardWithCommand(command, args, text) {
     const child = spawn(command, args, {
       stdio: ['pipe', 'ignore', 'pipe'],
       windowsHide: true,
+      env: { ...process.env, LANG: 'en_US.UTF-8', LC_ALL: 'en_US.UTF-8' },
     });
     let stderr = '';
 
@@ -77,6 +78,7 @@ function readClipboardWithCommand(command, args) {
     const child = spawn(command, args, {
       stdio: ['ignore', 'pipe', 'pipe'],
       windowsHide: true,
+      env: { ...process.env, LANG: 'en_US.UTF-8', LC_ALL: 'en_US.UTF-8' },
     });
     let stdout = '';
     let stderr = '';
@@ -100,6 +102,7 @@ function readClipboardWithCommand(command, args) {
 
 async function writeClipboard(text) {
   if (process.platform === 'win32') {
+    console.error(`[writeClipboard] win32 len=${text.length}`);
     await writeClipboardWithCommand('powershell.exe', [
       '-NoProfile',
       '-NonInteractive',
@@ -110,7 +113,16 @@ async function writeClipboard(text) {
   }
 
   if (process.platform === 'darwin') {
-    await writeClipboardWithCommand('pbcopy', [], text);
+    console.error(`[writeClipboard] darwin pbcopy len=${text.length} text="${text.slice(0, 100)}"`);
+    try {
+      await writeClipboardWithCommand('pbcopy', [], text);
+      console.error(`[writeClipboard] pbcopy ok, verifying...`);
+      const written = await readClipboardWithCommand('pbpaste', []);
+      console.error(`[writeClipboard] pbpaste verify: len=${written.length} match=${written === text}`);
+    } catch(e) {
+      console.error(`[writeClipboard] pbcopy failed: ${e.message}`);
+      throw e;
+    }
     return;
   }
 
@@ -144,6 +156,8 @@ async function readClipboard() {
 
 const server = http.createServer(async (req, res) => {
   const origin = req.headers.origin;
+  const ts = new Date().toISOString();
+  console.error(`[${ts}] ${req.method} ${req.url} origin=${origin || '-'}`);
 
   if (!isAllowedOrigin(origin)) {
     sendJson(res, 403, { ok: false, error: 'origin is not allowed' }, origin);
