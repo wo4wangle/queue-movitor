@@ -309,7 +309,19 @@ export async function remToMarkdown(
   const markdown = await safeToMarkdown(plugin, rem.text, options, 'rem.toMarkdown');
 
   if (richTextLooksLikeCodeBlock(rem.text) || (await childrenContainCodeBlockMetadata(plugin, children, options))) {
-    return formatFencedCodeBullet(markdown, indent, getCodeBlockLanguage(rem.text));
+    const lines = [formatFencedCodeBullet(markdown, indent, getCodeBlockLanguage(rem.text))];
+
+    for (const child of children) {
+      const childMarkdown = await safeToMarkdown(plugin, child.text, options, 'child.toMarkdown');
+
+      if (isInternalRemNoteMetadataMarkdown(childMarkdown)) {
+        continue;
+      }
+
+      lines.push(await remToMarkdown(plugin, child, indent + 1, options));
+    }
+
+    return lines.join('\n');
   }
 
   const lines = [formatMarkdownBullet(markdown, indent)];
