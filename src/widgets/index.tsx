@@ -423,7 +423,7 @@ async function onActivate(plugin: ReactRNPlugin) {
     name: 'cm debug',
     description: 'Show Copy Markdown debug information',
     keywords: 'copy markdown debug clipboard selection',
-    quickCode: 'cm debug',
+    quickCode: 'cmd',
     action: async () => {
       await appendDebugLog(plugin, 'debug:open-command');
       await openDebugPopup(plugin);
