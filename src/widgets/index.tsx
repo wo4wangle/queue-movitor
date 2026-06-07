@@ -389,6 +389,27 @@ async function onActivate(plugin: ReactRNPlugin) {
       await appendDebugLog(plugin, 'copy:clipboard-result', copyResult);
 
       if (copyResult.ok) {
+        await sleep(200);
+        const verifyResult = await readTextFromClipboard();
+
+        await appendDebugLog(plugin, 'copy:clipboard-verify', {
+          ok: verifyResult.ok,
+          method: verifyResult.ok ? verifyResult.method : undefined,
+          verifyLength: verifyResult.ok ? verifyResult.text.length : undefined,
+          expectedLength: md.length,
+          match: verifyResult.ok ? verifyResult.text === md : undefined,
+          verifyPreview: verifyResult.ok ? verifyResult.text.slice(0, 80) : undefined,
+          expectedPreview: md.slice(0, 80),
+        });
+
+        if (verifyResult.ok && verifyResult.text !== md) {
+          await appendDebugLog(plugin, 'copy:clipboard-mismatch', {
+            expectedLength: md.length,
+            actualLength: verifyResult.text.length,
+            actualPreview: verifyResult.text.slice(0, 200),
+          });
+        }
+
         await plugin.app.toast('Copied bullet markdown to clipboard');
         return;
       }
