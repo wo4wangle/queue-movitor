@@ -260,10 +260,12 @@ export async function writeTextToClipboard(
 ): Promise<ClipboardCopyResult> {
   let lastDirectCopyFailure: ClipboardCopyResult = { ok: false };
 
+  let bridgeSucceeded = false;
+
   if (allowLocalClipboardBridge) {
     try {
       await writeTextWithLocalClipboardBridge(text, localClipboardBridgeUrl);
-      return { ok: true, method: 'local.clipboard-bridge' };
+      bridgeSucceeded = true;
     } catch (error) {
       lastDirectCopyFailure = {
         ok: false,
@@ -271,6 +273,16 @@ export async function writeTextToClipboard(
         error,
       };
     }
+  }
+
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text);
+    }
+  } catch {}
+
+  if (bridgeSucceeded) {
+    return { ok: true, method: 'local.clipboard-bridge' };
   }
 
   try {

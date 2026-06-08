@@ -20,7 +20,7 @@ import {
 const COPY_POPUP_WIDGET = 'sample_widget';
 const SELECTION_CACHE_LISTENER_KEY = 'copy-bullet-markdown-selection-cache';
 const FOCUSED_REM_CACHE_LISTENER_KEY = 'copy-bullet-markdown-focused-rem-cache';
-const SELECTION_CACHE_MAX_AGE_MS = 120000;
+const SELECTION_CACHE_MAX_AGE_MS = 300000;
 const SELECTION_CACHE_POLL_INTERVAL_MS = 500;
 
 let lastSelectedRemIds: string[] = [];
@@ -349,6 +349,7 @@ async function onActivate(plugin: ReactRNPlugin) {
 
   const copyBulletMarkdownAction = async (args?: CopyCommandArgs) => {
     try {
+      await refreshSelectionCache(plugin, undefined, 'copy-trigger');
       const recentSelectedRemIds = getRecentSelectedRemIds();
 
       await appendDebugLog(plugin, 'copy:start', {
@@ -407,6 +408,30 @@ async function onActivate(plugin: ReactRNPlugin) {
             expectedLength: md.length,
             actualLength: verifyResult.text.length,
             actualPreview: verifyResult.text.slice(0, 200),
+          });
+        }
+
+        await sleep(1500);
+        const lateVerify = await readTextFromClipboard();
+
+        if (lateVerify.ok && lateVerify.text !== md) {
+          await appendDebugLog(plugin, 'copy:clipboard-delayed-mismatch', {
+            expectedLength: md.length,
+            lateLength: lateVerify.text.length,
+            latePreview: lateVerify.text.slice(0, 200),
+          });
+
+          await writeTextToClipboard(md);
+          await sleep(300);
+          const retryVerify = await readTextFromClipboard();
+          await appendDebugLog(plugin, 'copy:clipboard-retry-verify', {
+            ok: retryVerify.ok,
+            match: retryVerify.ok ? retryVerify.text === md : undefined,
+            retryPreview: retryVerify.ok ? retryVerify.text.slice(0, 80) : undefined,
+          });
+        } else if (lateVerify.ok && lateVerify.text === md) {
+          await appendDebugLog(plugin, 'copy:clipboard-delayed-ok', {
+            lateLength: lateVerify.text.length,
           });
         }
 
